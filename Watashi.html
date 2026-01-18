@@ -118,10 +118,10 @@
         import { OrbitControls } from 'https://unpkg.com/three@0.126.0/examples/jsm/controls/OrbitControls.js';
 
         const CONFIG = {
-            wallColor: 0xeae6e0,
-            floorColor: 0xd6cfc4,
-            spotlightColor: 0xfff0e0,
-            roomWidth: 50, // 少し広く
+            wallColor: 0x1a1a1a,
+            floorColor: 0x0d0d0d,
+            spotlightColor: 0xffaa55,
+            roomWidth: 50, 
             roomDepth: 30
         };
 
@@ -204,6 +204,8 @@
             room.receiveShadow = true;
             scene.add(room);
 
+            let frameIdCounter = 0;
+
             // Frames Layout
             // Front & Back
             const zDist = CONFIG.roomDepth / 2 - 0.1;
@@ -212,18 +214,21 @@
             const zPos = [-zDist, zDist];
             const rots = [0, Math.PI];
             zPos.forEach((z, i) => {
-                for(let x = -15; x <= 15; x += 6) createFrame(x, 0, z, rots[i]);
+                // createFrame の引数の最後に frameIdCounter++ を追加
+                for(let x = -15; x <= 15; x += 6) createFrame(x, 0, z, rots[i], frameIdCounter++);
             });
-            
+    
             // Side
             const xPos = [-xDist, xDist];
             const sideRots = [Math.PI/2, -Math.PI/2];
-            xPos.forEach((x, i) => {
-                for(let z = -9; z <= 9; z += 6) createFrame(x, 0, z, sideRots[i]);
-            });
-        }
+         xPos.forEach((x, i) => {
+    
+            for(let z = -9; z <= 9; z += 6) createFrame(x, 0, z, sideRots[i], frameIdCounter++);
+        });
+    }
 
-        function createFrame(x, y, z, rotY) {
+        // 2. createFrame の引数に id を追加し、保存データを読み込む処理を追加
+        function createFrame(x, y, z, rotY, id) { // ← id を追加
             const group = new THREE.Group();
             group.position.set(x, y, z);
             group.rotation.y = rotY;
@@ -240,9 +245,32 @@
                 new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.1 })
             );
             canvas.position.z = 0.06;
-            canvas.userData = { isCanvas: true };
+    
+            // ★ここにIDを保存しておく
+            canvas.userData = { isCanvas: true, id: id }; 
+    
+            // ★【重要】保存された画像があれば読み込む処理
+            const savedData = localStorage.getItem('myMuseum_images');
+            if (savedData) {
+                const images = JSON.parse(savedData);
+                if (images[id]) {
+                    // 保存された画像データ(Base64)がある場合
+                    const loader = new THREE.TextureLoader();
+                    const texture = loader.load(images[id]);
+                    texture.encoding = THREE.sRGBEncoding;
+            
+                    // マテリアルに適用
+                    canvas.material.map = texture;
+                    canvas.material.color.setHex(0xffffff); // 白に戻す
+                    canvas.material.needsUpdate = true;
+            
+                    // 縦横比の調整（簡易版：保存時に比率も保存するのがベストですが、一旦フィットさせます）
+                    // 必要であればここにアスペクト比調整ロジックも入れられます
+                }
+            }
+
             group.add(canvas);
-            frames.push(canvas); // Raycaster対象
+            frames.push(canvas);
 
             // Light (Visual)
             const spot = new THREE.SpotLight(CONFIG.spotlightColor, 2.0);
@@ -448,7 +476,9 @@
         function finishEditing() {
             if(!cropper || !targetObjForEdit) { closeEditor(); return; }
             document.getElementById('loading').style.display = 'block';
-            const canvas = cropper.getCroppedCanvas({ maxWidth: 2048, maxHeight: 2048, fillColor: '#fff' });
+    
+            // 少しサイズを落とす（ローカルストレージの容量制限対策）
+            const canvas = cropper.getCroppedCanvas({ maxWidth: 1024, maxHeight: 1024, fillColor: '#fff' });
             if(!canvas) { closeEditor(); return; }
 
             const texture = new THREE.CanvasTexture(canvas);
@@ -470,6 +500,23 @@
             targetObjForEdit.material.needsUpdate = true;
             targetObjForEdit.material.color.setHex(0xffffff); 
             targetObjForEdit.material.roughness = 0.4;
+            try {
+                // 1. 画像を文字列データ(Base64)に変換
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.8); // JPEG形式、画質80%で軽量化
+        
+                // 2. 今の保存データを取得
+                let savedData = JSON.parse(localStorage.getItem('myMuseum_images') || '{}');
+        
+                // 3. 対象のIDに紐づけて保存
+                savedData[targetObjForEdit.userData.id] = dataUrl;
+        
+                // 4. 書き込み
+                localStorage.setItem('myMuseum_images', JSON.stringify(savedData));
+        
+            } catch (e) {
+                console.error("保存容量オーバーなどのエラー:", e);
+                alert("保存容量がいっぱいで保存できませんでした（ブラウザの制限です）");
+         }
             closeEditor();
         }
 
